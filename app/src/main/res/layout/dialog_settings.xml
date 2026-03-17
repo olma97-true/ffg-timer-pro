@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Slideshow URL"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/editSlidesUrl"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="Enter URL"
+                android:inputType="textUri"
+                android:focusable="true"
+                android:nextFocusRight="@id/btnQrSync"
+                android:nextFocusDown="@id/radioTheme1" />
+
+            <Button
+                android:id="@+id/btnQrSync"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="QR Sync"
+                android:layout_marginStart="8dp"
+                android:focusable="true"
+                android:nextFocusLeft="@id/editSlidesUrl"
+                android:nextFocusDown="@id/radioTheme1" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Select Theme"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/radioGroupThemes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="8dp">
+
+            <RadioButton
+                android:id="@+id/radioTheme1"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Classic Blue"
+                android:focusable="true"
+                android:nextFocusUp="@id/editSlidesUrl" />
+
+            <RadioButton
+                android:id="@+id/radioTheme2"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Fire Red"
+                android:focusable="true" />
+
+            <RadioButton
+                android:id="@+id/radioTheme3"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Forest Green"
+                android:focusable="true" />
+
+            <RadioButton
+                android:id="@+id/radioTheme4"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Royal Purple"
+                android:focusable="true" />
+        </RadioGroup>
+
+    </LinearLayout>
+</ScrollView>
