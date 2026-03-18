@@ -31,7 +31,7 @@
                 android:inputType="textUri"
                 android:focusable="true"
                 android:nextFocusRight="@id/btnQrSync"
-                android:nextFocusDown="@id/radioTheme1" />
+                android:nextFocusDown="@id/editStartRound" />
 
             <Button
                 android:id="@+id/btnQrSync"
@@ -41,8 +41,26 @@
                 android:layout_marginStart="8dp"
                 android:focusable="true"
                 android:nextFocusLeft="@id/editSlidesUrl"
-                android:nextFocusDown="@id/radioTheme1" />
+                android:nextFocusDown="@id/editStartRound" />
         </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Start at Round"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/editStartRound"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="1"
+            android:inputType="number"
+            android:focusable="true"
+            android:nextFocusUp="@id/editSlidesUrl"
+            android:nextFocusDown="@id/radioTheme1" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -65,7 +83,7 @@
                 android:layout_height="wrap_content"
                 android:text="Classic Blue"
                 android:focusable="true"
-                android:nextFocusUp="@id/editSlidesUrl" />
+                android:nextFocusUp="@id/editStartRound" />
 
             <RadioButton
                 android:id="@+id/radioTheme2"

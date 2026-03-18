@@ -6,6 +6,13 @@
     android:layout_height="match_parent"
     android:background="@android:color/black">
 
+    <ImageView
+        android:id="@+id/flameAnimation"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone" />
+
     <WebView
         android:id="@+id/webView"
         android:layout_width="match_parent"
@@ -27,7 +34,7 @@
         android:id="@+id/timerContainer"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@android:color/black"
+        android:background="@android:color/transparent"
         android:padding="16dp"
         android:visibility="gone">
 
@@ -324,5 +331,12 @@
         android:textColor="@android:color/white"
         android:textSize="24sp"
         android:textStyle="bold" />
+
+    <VideoView
+        android:id="@+id/niceVideoView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:visibility="gone" />
 
 </FrameLayout>

@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.media.MediaPlayer
+import android.media.AudioAttributes
+import android.media.SoundPool
+import android.net.Uri
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.Handler
@@ -13,9 +15,9 @@ import android.os.Looper
 import android.util.Log
 import android.util.TypedValue
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -25,6 +27,7 @@ import android.widget.ImageView
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.VideoView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.zxing.BarcodeFormat
@@ -52,6 +55,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSettings: ImageButton
     private lateinit var sideQuickSets: View
     private lateinit var btnToggleWarning: ImageButton
+    private lateinit var flameAnimation: ImageView
+    private lateinit var niceVideoView: VideoView
 
     private lateinit var txtRoundLength: TextView
     private lateinit var txtRestTime: TextView
@@ -66,11 +71,19 @@ class MainActivity : AppCompatActivity() {
     private var isTimerRunning: Boolean = false
     private var isInitialCountdown: Boolean = false
     private var isWarningEnabled: Boolean = true
+    private var warningPlayedInCurrentSegment: Boolean = false
     private var timeLeftMs: Long = roundLengthSec * 1000L
 
+    private var nicePlayedForRound: Int = -1
+
     private var countDownTimer: CountDownTimer? = null
-    private var mediaPlayer: MediaPlayer? = null
-    private var warningPlayer: MediaPlayer? = null
+    private var currentTimerId = 0
+    
+    // Audio using SoundPool for low latency and reliability
+    private var soundPool: SoundPool? = null
+    private var soundBeep: Int = 0
+    private var soundBell: Int = 0
+    private var lastAlarmTime: Long = 0
 
     private val inactivityHandler = Handler(Looper.getMainLooper())
     private val inactivityRunnable = Runnable {
@@ -102,12 +115,32 @@ class MainActivity : AppCompatActivity() {
 
     private var httpServer: AndroidHttpServer? = null
 
+    // PNG Sequence Animation variables
+    private var currentFrameIndex = 1
+    private val totalFrames = 176
+    private val frameHandler = Handler(Looper.getMainLooper())
+    private val frameRunnable = object : Runnable {
+        override fun run() {
+            val frameName = String.format("frame_%06d", currentFrameIndex)
+            val resId = resources.getIdentifier(frameName, "raw", packageName)
+            if (resId != 0) {
+                flameAnimation.setImageResource(resId)
+            }
+            currentFrameIndex++
+            if (currentFrameIndex > totalFrames) {
+                currentFrameIndex = 1
+            }
+            frameHandler.postDelayed(this, 41) // Approx 24fps
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         loadPreferences()
+        setupAudio()
 
         webView = findViewById(R.id.webView)
         webViewOverlay = findViewById(R.id.webViewOverlay)
@@ -122,11 +155,14 @@ class MainActivity : AppCompatActivity() {
         btnSettings = findViewById(R.id.btnSettings)
         sideQuickSets = findViewById(R.id.sideQuickSets)
         btnToggleWarning = findViewById(R.id.btnToggleWarning)
+        flameAnimation = findViewById(R.id.flameAnimation)
+        niceVideoView = findViewById(R.id.niceVideoView)
 
         txtRoundLength = findViewById(R.id.txtRoundLength)
         txtRestTime = findViewById(R.id.txtRestTime)
         txtNumRounds = findViewById(R.id.txtNumRounds)
 
+        setupNiceVideo()
         setupWebView()
         setupButtons()
         applyTheme()
@@ -140,11 +176,35 @@ class MainActivity : AppCompatActivity() {
         startHttpServer()
     }
 
+    private fun setupNiceVideo() {
+        val videoUri = Uri.parse("android.resource://" + packageName + "/" + R.raw.nice)
+        niceVideoView.setVideoURI(videoUri)
+        niceVideoView.setOnCompletionListener {
+            niceVideoView.visibility = View.GONE
+        }
+    }
+
+    private fun setupAudio() {
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        
+        soundPool = SoundPool.Builder()
+            .setMaxStreams(5)
+            .setAudioAttributes(audioAttributes)
+            .build()
+        
+        soundBeep = soundPool?.load(this, R.raw.beep, 1) ?: 0
+        soundBell = soundPool?.load(this, R.raw.bell, 1) ?: 0
+    }
+
     private fun loadPreferences() {
         val prefs = getSharedPreferences("BJJTimerPrefs", Context.MODE_PRIVATE)
         slidesUrl = prefs.getString("slidesUrl", slidesUrl) ?: slidesUrl
         currentThemeIndex = prefs.getInt("themeIndex", 0)
         isWarningEnabled = prefs.getBoolean("warningEnabled", true)
+        currentRound = prefs.getInt("currentRound", 1)
     }
 
     private fun savePreferences() {
@@ -153,6 +213,7 @@ class MainActivity : AppCompatActivity() {
             putString("slidesUrl", slidesUrl)
             putInt("themeIndex", currentThemeIndex)
             putBoolean("warningEnabled", isWarningEnabled)
+            putInt("currentRound", currentRound)
             apply()
         }
     }
@@ -175,6 +236,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isResting && currentRound == 1 && timeLeftMs == roundLengthSec * 1000L) {
                     startInitialCountdown()
                 } else {
+                    if (!isResting) playAlarm()
                     startTimer()
                 }
             }
@@ -341,13 +403,35 @@ class MainActivity : AppCompatActivity() {
         builder.setTitle("Settings")
         val view = layoutInflater.inflate(R.layout.dialog_settings, null)
         val editUrl = view.findViewById<EditText>(R.id.editSlidesUrl)
+        val editStartRound = view.findViewById<EditText>(R.id.editStartRound)
         val radioGroup = view.findViewById<RadioGroup>(R.id.radioGroupThemes)
         val btnQrSync = view.findViewById<Button>(R.id.btnQrSync)
 
         editUrl.setText(slidesUrl)
+        editStartRound.setText(currentRound.toString())
         
         btnQrSync.setOnClickListener {
             showQrDialog()
+        }
+
+        // Android TV Remote Keyboard Logic
+        val focusChangeListener = View.OnFocusChangeListener { v, hasFocus ->
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+            if (hasFocus && v is EditText) {
+                v.postDelayed({
+                    imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+                }, 100)
+            } else if (!hasFocus) {
+                imm.hideSoftInputFromWindow(v.windowToken, 0)
+            }
+        }
+        editUrl.onFocusChangeListener = focusChangeListener
+        editStartRound.onFocusChangeListener = focusChangeListener
+
+        // Also add listeners to other focusable views to ensure keyboard hides
+        btnQrSync.onFocusChangeListener = focusChangeListener
+        for (i in 0 until radioGroup.childCount) {
+            radioGroup.getChildAt(i).onFocusChangeListener = focusChangeListener
         }
 
         // Select current theme radio button
@@ -361,6 +445,7 @@ class MainActivity : AppCompatActivity() {
         builder.setView(view)
         builder.setPositiveButton("Save") { _, _ ->
             val newUrl = editUrl.text.toString()
+            val newStartRound = editStartRound.text.toString().toIntOrNull() ?: currentRound
             val newThemeIndex = when (radioGroup.checkedRadioButtonId) {
                 R.id.radioTheme1 -> 0
                 R.id.radioTheme2 -> 1
@@ -374,6 +459,14 @@ class MainActivity : AppCompatActivity() {
                 webView.loadUrl(slidesUrl)
             }
             
+            if (!isTimerRunning && newStartRound != currentRound) {
+                currentRound = newStartRound
+                nicePlayedForRound = -1
+                updateRoundInfo()
+                timeLeftMs = roundLengthSec * 1000L
+                updateTimerText()
+            }
+            
             currentThemeIndex = newThemeIndex
             savePreferences()
             applyTheme()
@@ -381,7 +474,8 @@ class MainActivity : AppCompatActivity() {
         builder.setNegativeButton("Cancel", null)
         
         val dialog = builder.create()
-        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
+        // Ensure dialog window itself allows soft input
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
         dialog.show()
     }
 
@@ -496,6 +590,29 @@ class MainActivity : AppCompatActivity() {
         }
         val roundsText = if (totalRounds == 0) "Round $currentRound" else "Round $currentRound / $totalRounds"
         roundInfo.text = if (isResting) "RESTING" else roundsText
+        
+        // Flame animation logic: Only play when a round is running (not resting, not in main menu)
+        if (isTimerRunning && !isResting && currentRound >= 50) {
+            if (flameAnimation.visibility != View.VISIBLE) {
+                flameAnimation.visibility = View.VISIBLE
+                startFlameAnimation()
+            }
+        } else {
+            if (flameAnimation.visibility == View.VISIBLE) {
+                stopFlameAnimation()
+                flameAnimation.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun startFlameAnimation() {
+        frameHandler.removeCallbacks(frameRunnable)
+        currentFrameIndex = 1
+        frameHandler.post(frameRunnable)
+    }
+
+    private fun stopFlameAnimation() {
+        frameHandler.removeCallbacks(frameRunnable)
     }
 
     private fun updateFinishTime() {
@@ -557,8 +674,9 @@ class MainActivity : AppCompatActivity() {
         btnStartPause.text = "PAUSE"
         
         countDownTimer?.cancel()
-        countDownTimer = object : CountDownTimer(5000, 1000) {
+        countDownTimer = object : CountDownTimer(5000, 200) {
             override fun onTick(millisUntilFinished: Long) {
+                if (!isTimerRunning) return
                 val seconds = (millisUntilFinished / 1000) + 1
                 timerDisplay.text = seconds.toString()
                 timerDisplay.setTextColor(Color.WHITE)
@@ -566,6 +684,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onFinish() {
+                if (!isTimerRunning) return
                 isInitialCountdown = false
                 playAlarm()
                 startTimer()
@@ -577,24 +696,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startTimer() {
+        val timerId = ++currentTimerId
         isTimerRunning = true
         btnStartPause.text = "PAUSE"
         
         updateRoundInfo()
         updateTimerText()
+
+        // nice.mp4 logic: Play after bell if we just started round 69
+        if (currentRound == 69 && !isResting && nicePlayedForRound != 69) {
+            nicePlayedForRound = 69
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (isTimerRunning && currentRound == 69 && !isResting) {
+                    niceVideoView.visibility = View.VISIBLE
+                    niceVideoView.start()
+                }
+            }, 600) // Delay to let bell sound first
+        }
         
         countDownTimer?.cancel()
-        countDownTimer = object : CountDownTimer(timeLeftMs, 1000) {
+        countDownTimer = object : CountDownTimer(timeLeftMs, 200) {
             override fun onTick(millisUntilFinished: Long) {
+                if (timerId != currentTimerId || !isTimerRunning) return
                 timeLeftMs = millisUntilFinished
                 
                 // Check for warning beeps
-                if (isWarningEnabled) {
+                if (isWarningEnabled && !warningPlayedInCurrentSegment) {
                     val secondsLeft = (timeLeftMs / 1000).toInt()
-                    if (isResting && secondsLeft == 10) {
+                    val threshold = if (isResting) 10 else 30
+                    
+                    val currentPhaseLength = if (isResting) restTimeSec else roundLengthSec
+                    if (currentPhaseLength > threshold && secondsLeft <= threshold && timeLeftMs > 0) {
                         playWarning()
-                    } else if (!isResting && secondsLeft == 30) {
-                        playWarning()
+                        warningPlayedInCurrentSegment = true
                     }
                 }
                 
@@ -602,21 +736,18 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onFinish() {
+                if (timerId != currentTimerId || !isTimerRunning) return
+                
                 playAlarm()
-                if (isResting) {
-                    isResting = false
-                    currentRound++
-                    timeLeftMs = roundLengthSec * 1000L
-                } else {
-                    if (totalRounds > 0 && currentRound >= totalRounds) {
-                        resetTimer()
-                        return
+                warningPlayedInCurrentSegment = false // Reset for next segment
+                
+                // Post transition to next segment
+                Handler(Looper.getMainLooper()).post {
+                    if (timerId == currentTimerId && isTimerRunning) {
+                        prepareNextSegment()
+                        startTimer()
                     }
-                    isResting = true
-                    timeLeftMs = restTimeSec * 1000L
                 }
-                updateRoundInfo()
-                startTimer()
             }
         }.start()
         
@@ -624,11 +755,33 @@ class MainActivity : AppCompatActivity() {
         updateUIState()
     }
 
+    private fun prepareNextSegment() {
+        if (isResting) {
+            isResting = false
+            currentRound++
+            timeLeftMs = roundLengthSec * 1000L
+        } else {
+            if (totalRounds > 0 && currentRound >= totalRounds) {
+                resetTimer()
+                return
+            }
+            
+            if (restTimeSec > 0) {
+                isResting = true
+                timeLeftMs = restTimeSec * 1000L
+            } else {
+                currentRound++
+                timeLeftMs = roundLengthSec * 1000L
+            }
+        }
+    }
+
     private fun pauseTimer() {
         isTimerRunning = false
         isInitialCountdown = false
         btnStartPause.text = "START"
         countDownTimer?.cancel()
+        countDownTimer = null
         updateUIState()
         updateTimerText()
         updateRoundInfo()
@@ -639,22 +792,24 @@ class MainActivity : AppCompatActivity() {
         isResting = false
         isInitialCountdown = false
         currentRound = 1
+        nicePlayedForRound = -1
         timeLeftMs = roundLengthSec * 1000L
+        warningPlayedInCurrentSegment = false
         updateTimerText()
         updateRoundInfo()
         updateUIState()
     }
 
     private fun playAlarm() {
-        mediaPlayer?.release()
-        mediaPlayer = MediaPlayer.create(this, R.raw.bell)
-        mediaPlayer?.start()
+        val now = System.currentTimeMillis()
+        if (now - lastAlarmTime < 1000) return
+        lastAlarmTime = now
+        
+        soundPool?.play(soundBell, 1f, 1f, 1, 0, 1f)
     }
 
     private fun playWarning() {
-        warningPlayer?.release()
-        warningPlayer = MediaPlayer.create(this, R.raw.beep)
-        warningPlayer?.start()
+        soundPool?.play(soundBeep, 1f, 1f, 1, 0, 1f)
     }
 
     private fun showSlides() {
@@ -696,10 +851,10 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         countDownTimer?.cancel()
-        mediaPlayer?.release()
-        warningPlayer?.release()
+        soundPool?.release()
         httpServer?.stop()
         refreshHandler.removeCallbacks(refreshRunnable)
+        stopFlameAnimation()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -710,6 +865,32 @@ class MainActivity : AppCompatActivity() {
                     hideSlides()
                 }
                 return true // Consume both DOWN and UP actions
+            }
+        } else {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_BACK,
+                    KeyEvent.KEYCODE_MEDIA_STOP,
+                    KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                        if (isTimerRunning) {
+                            pauseTimer()
+                            return true
+                        }
+                    }
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
+                        if (isTimerRunning) {
+                            pauseTimer()
+                        } else {
+                            if (!isResting && currentRound == 1 && timeLeftMs == roundLengthSec * 1000L) {
+                                startInitialCountdown()
+                            } else {
+                                if (!isResting) playAlarm()
+                                startTimer()
+                            }
+                        }
+                        return true
+                    }
+                }
             }
         }
         return super.dispatchKeyEvent(event)
